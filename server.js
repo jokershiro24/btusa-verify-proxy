@@ -50,7 +50,11 @@ app.post('/verify', async (req, res) => {
     );
 
     const data = await response.json();
-    console.log('[verify] raw Shopify response data:', JSON.stringify(data.data));
+    console.log('[verify] Shopify HTTP status:', response.status);
+    console.log('[verify] full Shopify response:', JSON.stringify(data, null, 2));
+    if (data.errors) {
+      console.error('[verify] GraphQL errors:', JSON.stringify(data.errors, null, 2));
+    }
 
     const records = data.data?.metaobjects?.edges ?? [];
     console.log('[verify] orderNumber values from metaobjects:', records.map(e => e.node.orderNumber?.value));
