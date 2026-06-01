@@ -29,10 +29,10 @@ app.post('/verify', async (req, res) => {
     const query = `{
       metaobjects(type: "sidekick_batch_registry", first: 250) {
         edges { node {
-          orderNumber: field(key: "order_number") { value }
-          status: field(key: "status") { value }
-          productName: field(key: "product_name") { value }
-          lotNumber: field(key: "lot_number") { value }
+          orderNumber: field(key: "order_number") { jsonValue }
+          status: field(key: "status") { jsonValue }
+          productName: field(key: "product_name") { jsonValue }
+          lotNumber: field(key: "lot_number") { jsonValue }
         }}
       }
     }`;
@@ -53,13 +53,13 @@ app.post('/verify', async (req, res) => {
     console.log('[verify] raw Shopify response data:', JSON.stringify(data.data));
 
     const records = data.data?.metaobjects?.edges ?? [];
-    console.log('[verify] orderNumber values from metaobjects:', records.map(e => e.node.orderNumber?.value));
+    console.log('[verify] orderNumber values from metaobjects:', records.map(e => e.node.orderNumber?.jsonValue));
 
     const normalizedIncoming = normalizeOrderNumber(order_number);
     console.log('[verify] normalized incoming:', JSON.stringify(normalizedIncoming));
 
     const match = records.find(e => {
-      const normalizedStored = normalizeOrderNumber(e.node.orderNumber?.value);
+      const normalizedStored = normalizeOrderNumber(e.node.orderNumber?.jsonValue);
       console.log('[verify] comparing stored:', JSON.stringify(normalizedStored), 'vs incoming:', JSON.stringify(normalizedIncoming));
       return normalizedStored === normalizedIncoming;
     });
@@ -67,11 +67,11 @@ app.post('/verify', async (req, res) => {
     let result;
     if (!match) {
       result = { status: 'not_found', message: 'Order not found in registry' };
-    } else if (match.node.status?.value === 'Verified') {
+    } else if (match.node.status?.jsonValue === 'Verified') {
       result = { status: 'verified', message: 'Authentic',
-                 product: match.node.productName?.value,
-                 lot: match.node.lotNumber?.value };
-    } else if (match.node.status?.value === 'Flagged') {
+                 product: match.node.productName?.jsonValue,
+                 lot: match.node.lotNumber?.jsonValue };
+    } else if (match.node.status?.jsonValue === 'Flagged') {
       result = { status: 'flagged', message: 'Flagged — please contact support' };
     } else {
       result = { status: 'pending', message: 'Pending verification' };
