@@ -8,9 +8,22 @@ app.use(express.json());
 const SHOPIFY_STORE = 'biotech-usa.myshopify.com';
 const SHOPIFY_TOKEN = process.env.SHOPIFY_ADMIN_TOKEN;
 
+if (!SHOPIFY_TOKEN) {
+  console.error('FATAL: SHOPIFY_ADMIN_TOKEN environment variable is not set');
+  process.exit(1);
+}
+
+const normalizeOrderNumber = (value) => {
+  if (!value) return '';
+  return value.trim().toLowerCase().replace(/^#/, '');
+};
+
 app.post('/verify', async (req, res) => {
   const { order_number, batch_number, name, mobile } = req.body;
   if (!order_number) return res.json({ status: 'error', message: 'Order number required' });
+
+  console.log('[verify] incoming order_number raw:', JSON.stringify(order_number));
+  console.log('[verify] incoming order_number trimmed:', JSON.stringify(order_number.trim()));
 
   try {
     const query = `{
@@ -37,10 +50,19 @@ app.post('/verify', async (req, res) => {
     );
 
     const data = await response.json();
+    console.log('[verify] raw Shopify response data:', JSON.stringify(data.data));
+
     const records = data.data?.metaobjects?.edges ?? [];
-    const match = records.find(
-      e => e.node.orderNumber?.value?.toLowerCase() === order_number.trim().toLowerCase()
-    );
+    console.log('[verify] orderNumber values from metaobjects:', records.map(e => e.node.orderNumber?.value));
+
+    const normalizedIncoming = normalizeOrderNumber(order_number);
+    console.log('[verify] normalized incoming:', JSON.stringify(normalizedIncoming));
+
+    const match = records.find(e => {
+      const normalizedStored = normalizeOrderNumber(e.node.orderNumber?.value);
+      console.log('[verify] comparing stored:', JSON.stringify(normalizedStored), 'vs incoming:', JSON.stringify(normalizedIncoming));
+      return normalizedStored === normalizedIncoming;
+    });
 
     let result;
     if (!match) {
@@ -54,6 +76,8 @@ app.post('/verify', async (req, res) => {
     } else {
       result = { status: 'pending', message: 'Pending verification' };
     }
+
+    console.log('[verify] match result:', JSON.stringify(result));
 
     // Log the attempt
     await fetch(`https://${SHOPIFY_STORE}/admin/api/2025-10/graphql.json`, {
