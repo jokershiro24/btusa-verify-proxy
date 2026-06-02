@@ -5,7 +5,13 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const SHOPIFY_STORE = 'biotech-usa.myshopify.com';
+const SHOPIFY_STORE_DOMAIN = process.env.SHOPIFY_STORE_DOMAIN;
+
+if (!SHOPIFY_STORE_DOMAIN) {
+  console.error('FATAL: SHOPIFY_STORE_DOMAIN environment variable is not set');
+  process.exit(1);
+}
+
 const SHOPIFY_TOKEN = process.env.SHOPIFY_ADMIN_TOKEN;
 
 if (!SHOPIFY_TOKEN) {
@@ -42,7 +48,7 @@ app.post('/verify', async (req, res) => {
 }`;
 
     const response = await fetch(
-      `https://${SHOPIFY_STORE}/admin/api/2025-10/graphql.json`,
+      `https://${SHOPIFY_STORE_DOMAIN}/admin/api/2025-10/graphql.json`,
       {
         method: 'POST',
         headers: {
@@ -84,7 +90,7 @@ app.post('/verify', async (req, res) => {
     console.log('[verify] match result:', JSON.stringify(result));
 
     // Log the attempt
-    await fetch(`https://${SHOPIFY_STORE}/admin/api/2025-10/graphql.json`, {
+    await fetch(`https://${SHOPIFY_STORE_DOMAIN}/admin/api/2025-10/graphql.json`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
