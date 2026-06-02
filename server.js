@@ -1,15 +1,22 @@
 const express = require('express');
 const fetch = require('node-fetch');
+
 const app = express();
 app.use(express.json());
 
-const SHOPIFY_STORE_DOMAIN = process.env.SHOPIFY_STORE_DOMAIN; // e.g. biotech-usa.myshopify.com
+const SHOPIFY_STORE_DOMAIN = process.env.SHOPIFY_STORE_DOMAIN;
 const SHOPIFY_ADMIN_TOKEN = process.env.SHOPIFY_ADMIN_TOKEN;
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
+
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
 
 app.post('/verify', async (req, res) => {
   const { order_number, name, mobile } = req.body;
+
   console.log('[verify] incoming order_number raw:', order_number);
+
   if (!order_number) {
     return res.status(400).json({ status: 'error', message: 'order_number is required' });
   }
@@ -26,7 +33,6 @@ app.post('/verify', async (req, res) => {
             lotNumber: field(key: "lot_number") { jsonValue }
             productName: field(key: "product_name") { jsonValue }
             status: field(key: "status") { jsonValue }
-            notes: field(key: "notes") { jsonValue }
           }
         }
       }
@@ -61,6 +67,7 @@ app.post('/verify', async (req, res) => {
     }
 
     const status = (match.node.status?.jsonValue ?? '').toLowerCase();
+
     if (status === 'verified') {
       return res.json({
         status: 'verified',
@@ -79,16 +86,13 @@ app.post('/verify', async (req, res) => {
         message: 'This batch is pending verification.',
       });
     }
+
   } catch (err) {
     console.error('[verify] error:', err.message);
     return res.status(500).json({ status: 'error', message: 'Internal server error' });
   }
 });
 
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
-});
-
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
 });
