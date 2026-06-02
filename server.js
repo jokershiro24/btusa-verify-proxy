@@ -1,120 +1,94 @@
 const express = require('express');
-const cors = require('cors');
+const fetch = require('node-fetch');
 const app = express();
-
-app.use(cors());
 app.use(express.json());
 
-const SHOPIFY_STORE = 'biotech-usa.myshopify.com';
-const SHOPIFY_TOKEN = process.env.SHOPIFY_ADMIN_TOKEN;
-
-if (!SHOPIFY_TOKEN) {
-  console.error('FATAL: SHOPIFY_ADMIN_TOKEN environment variable is not set');
-  process.exit(1);
-}
-
-const normalizeOrderNumber = (value) => {
-  if (!value) return '';
-  return value.trim().toLowerCase().replace(/^#/, '');
-};
+const SHOPIFY_STORE_DOMAIN = process.env.SHOPIFY_STORE_DOMAIN; // e.g. biotech-usa.myshopify.com
+const SHOPIFY_ADMIN_TOKEN = process.env.SHOPIFY_ADMIN_TOKEN;
+const PORT = process.env.PORT || 3000;
 
 app.post('/verify', async (req, res) => {
-  const { order_number, batch_number, name, mobile } = req.body;
-  if (!order_number) return res.json({ status: 'error', message: 'Order number required' });
+  const { order_number, name, mobile } = req.body;
+  console.log('[verify] incoming order_number raw:', order_number);
+  if (!order_number) {
+    return res.status(400).json({ status: 'error', message: 'order_number is required' });
+  }
 
-  console.log('[verify] incoming order_number raw:', JSON.stringify(order_number));
-  console.log('[verify] incoming order_number trimmed:', JSON.stringify(order_number.trim()));
+  const normalized = order_number.trim().toLowerCase();
+  console.log('[verify] normalized incoming:', normalized);
 
   try {
     const query = `{
-  metaobjects(type: "sidekick_batch_registry", first: 250) {
-    edges {
-      node {
-        id
-        handle
-        orderNumber: field(key: "order_number") { jsonValue }
-        lotNumber: field(key: "lot_number") { jsonValue }
-        productName: field(key: "product_name") { jsonValue }
-        status: field(key: "status") { jsonValue }
+      metaobjects(type: "sidekick_batch_registry", first: 250) {
+        edges {
+          node {
+            orderNumber: field(key: "order_number") { jsonValue }
+            lotNumber: field(key: "lot_number") { jsonValue }
+            productName: field(key: "product_name") { jsonValue }
+            status: field(key: "status") { jsonValue }
+            notes: field(key: "notes") { jsonValue }
+          }
+        }
       }
-    }
-  }
-}`;
+    }`;
 
-    const response = await fetch(
-      `https://${SHOPIFY_STORE}/admin/api/2025-10/graphql.json`,
+    const shopifyRes = await fetch(
+      `https://${SHOPIFY_STORE_DOMAIN}/admin/api/2024-01/graphql.json`,
       {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Shopify-Access-Token': SHOPIFY_TOKEN,
+          'X-Shopify-Access-Token': SHOPIFY_ADMIN_TOKEN,
         },
         body: JSON.stringify({ query }),
       }
     );
 
-    const data = await response.json();
-    console.log('[verify] raw Shopify response data:', JSON.stringify(data.data));
+    const shopifyJson = await shopifyRes.json();
+    console.log('[verify] full shopify response:', JSON.stringify(shopifyJson));
 
-    const records = data.data?.metaobjects?.edges ?? [];
-    console.log('[verify] orderNumber values from metaobjects:', records.map(e => e.node.orderNumber?.jsonValue));
+    const edges = shopifyJson?.data?.metaobjects?.edges ?? [];
+    console.log('[verify] total records found:', edges.length);
 
-    const normalizedIncoming = normalizeOrderNumber(order_number);
-    console.log('[verify] normalized incoming:', JSON.stringify(normalizedIncoming));
-
-    const match = records.find(e => {
-      const normalizedStored = normalizeOrderNumber(e.node.orderNumber?.jsonValue);
-      console.log('[verify] comparing stored:', JSON.stringify(normalizedStored), 'vs incoming:', JSON.stringify(normalizedIncoming));
-      return normalizedStored === normalizedIncoming;
+    const match = edges.find((e) => {
+      const stored = (e.node.orderNumber?.jsonValue ?? '').trim().toLowerCase();
+      console.log('[verify] comparing stored:', stored, 'vs incoming:', normalized);
+      return stored === normalized;
     });
 
-    let result;
     if (!match) {
-      result = { status: 'not_found', message: 'Order not found in registry' };
-    } else if (match.node.status?.jsonValue === 'Verified') {
-      result = { status: 'verified', message: 'Authentic',
-                 product: match.node.productName?.jsonValue,
-                 lot: match.node.lotNumber?.jsonValue };
-    } else if (match.node.status?.jsonValue === 'Flagged') {
-      result = { status: 'flagged', message: 'Flagged — please contact support' };
-    } else {
-      result = { status: 'pending', message: 'Pending verification' };
+      return res.json({ status: 'not_found', message: 'Order not found in registry' });
     }
 
-    console.log('[verify] match result:', JSON.stringify(result));
-
-    // Log the attempt
-    await fetch(`https://${SHOPIFY_STORE}/admin/api/2025-10/graphql.json`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Shopify-Access-Token': SHOPIFY_TOKEN,
-      },
-      body: JSON.stringify({
-        query: `mutation CreateLog($m: MetaobjectCreateInput!) {
-          metaobjectCreate(metaobject: $m) { metaobject { id } }
-        }`,
-        variables: {
-          m: {
-            type: 'sidekick_verification_log',
-            handle: `log-${Date.now()}`,
-            fields: [
-              { key: 'submitter_name', value: name || '' },
-              { key: 'mobile', value: mobile || '' },
-              { key: 'order_number', value: order_number },
-              { key: 'lot_number', value: batch_number || '' },
-              { key: 'result', value: result.status },
-              { key: 'submitted_at', value: new Date().toISOString() },
-            ],
-          },
-        },
-      }),
-    });
-
-    res.json(result);
+    const status = (match.node.status?.jsonValue ?? '').toLowerCase();
+    if (status === 'verified') {
+      return res.json({
+        status: 'verified',
+        message: 'Product is authentic',
+        product_name: match.node.productName?.jsonValue ?? '',
+        lot_number: match.node.lotNumber?.jsonValue ?? '',
+      });
+    } else if (status === 'flagged') {
+      return res.json({
+        status: 'flagged',
+        message: 'This batch has been flagged. Please contact BioTechUSA Egypt support.',
+      });
+    } else {
+      return res.json({
+        status: 'pending',
+        message: 'This batch is pending verification.',
+      });
+    }
   } catch (err) {
-    res.status(500).json({ status: 'error', message: 'Server error' });
+    console.error('[verify] error:', err.message);
+    return res.status(500).json({ status: 'error', message: 'Internal server error' });
   }
 });
 
-app.listen(process.env.PORT || 3000, () => console.log('Proxy running'));
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
